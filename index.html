@@ -1,1 +1,583 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Open World Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
+        body {
+            background: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        #gameContainer {
+            position: relative;
+            border: 3px solid #e94560;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(233, 69, 96, 0.4);
+        }
+
+        canvas {
+            display: block;
+            background: #2d6a4f;
+            cursor: default;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 15px;
+            padding: 10px;
+        }
+
+        .ctrl-btn {
+            width: 70px;
+            height: 70px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(233, 69, 96, 0.8);
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: all 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        .ctrl-btn:active {
+            transform: scale(0.9);
+            background: #e94560;
+        }
+
+        #dpad {
+            display: grid;
+            grid-template-columns: 70px 70px 70px;
+            grid-template-rows: 70px 70px 70px;
+            gap: 5px;
+            justify-content: center;
+        }
+
+        #dpad .ctrl-btn {
+            width: 65px;
+            height: 65px;
+        }
+
+        .empty {
+            visibility: hidden;
+        }
+
+        #info {
+            color: white;
+            margin-top: 10px;
+            font-size: 14px;
+            text-align: center;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 500px) {
+            .ctrl-btn {
+                width: 55px;
+                height: 55px;
+                font-size: 22px;
+            }
+            #dpad .ctrl-btn {
+                width: 50px;
+                height: 50px;
+            }
+            #dpad {
+                grid-template-columns: 55px 55px 55px;
+                grid-template-rows: 55px 55px 55px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="600" height="400"></canvas>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div id="controls">
+        <div id="dpad">
+            <div class="empty"></div>
+            <button class="ctrl-btn" id="btnUp">▲</button>
+            <div class="empty"></div>
+            
+            <button class="ctrl-btn" id="btnLeft">◄</button>
+            <button class="ctrl-btn" id="btnDown">▼</button>
+            <button class="ctrl-btn" id="btnRight">►</button>
+        </div>
+    </div>
+
+    <div id="info">Arrows / WASD se bhi move kar sakte ho | World Size: 2000x2000</div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- Game World ---
+        const WORLD_WIDTH = 2000;
+        const WORLD_HEIGHT = 2000;
+
+        // --- Player ---
+        let player = {
+            x: WORLD_WIDTH / 2,
+            y: WORLD_HEIGHT / 2,
+            width: 20,
+            height: 20,
+            speed: 4,
+            color: '#e94560'
+        };
+
+        // --- Camera (viewport follows player) ---
+        let camera = {
+            x: 0,
+            y: 0
+        };
+
+        // --- Input State ---
+        let keys = {
+            up: false,
+            down: false,
+            left: false,
+            right: false
+        };
+
+        // --- World Objects (trees, buildings, etc.) ---
+        function randomBetween(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
+        // Generate trees
+        let trees = [];
+        for (let i = 0; i < 80; i++) {
+            trees.push({
+                x: randomBetween(50, WORLD_WIDTH - 50),
+                y: randomBetween(50, WORLD_HEIGHT - 50),
+                size: randomBetween(15, 30)
+            });
+        }
+
+        // Generate buildings
+        let buildings = [];
+        for (let i = 0; i < 15; i++) {
+            buildings.push({
+                x: randomBetween(100, WORLD_WIDTH - 150),
+                y: randomBetween(100, WORLD_HEIGHT - 150),
+                w: randomBetween(60, 120),
+                h: randomBetween(60, 120),
+                color: `hsl(${randomBetween(0, 40)}, 50%, 40%)`
+            });
+        }
+
+        // Generate NPCs
+        let npcs = [];
+        for (let i = 0; i < 5; i++) {
+            npcs.push({
+                x: randomBetween(100, WORLD_WIDTH - 100),
+                y: randomBetween(100, WORLD_HEIGHT - 100),
+                size: 18,
+                color: ['#ffd166', '#06d6a0', '#118ab2', '#ef476f', '#073b4c'][i % 5],
+                name: ['NPC', 'Villager', 'Merchant', 'Guide', 'Wanderer'][i % 5]
+            });
+        }
+
+        // --- World boundary check ---
+        function clamp(value, min, max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
+        // --- Update Player Position ---
+        function updatePlayer() {
+            if (keys.up) player.y -= player.speed;
+            if (keys.down) player.y += player.speed;
+            if (keys.left) player.x -= player.speed;
+            if (keys.right) player.x += player.speed;
+
+            // Clamp player to world bounds
+            player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
+            player.y = clamp(player.y, 0, WORLD_HEIGHT - player.height);
+
+            // Update camera to follow player
+            camera.x = player.x - canvas.width / 2;
+            camera.y = player.y - canvas.height / 2;
+
+            // Clamp camera to world bounds
+            camera.x = clamp(camera.x, 0, WORLD_WIDTH - canvas.width);
+            camera.y = clamp(camera.y, 0, WORLD_HEIGHT - canvas.height);
+        }
+
+        // --- Draw Grass Grid ---
+        function drawGrass() {
+            // Background
+            ctx.fillStyle = '#2d6a4f';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Grid lines
+            ctx.strokeStyle = '#40916c';
+            ctx.lineWidth = 0.5;
+            const gridSize = 50;
+            const startX = -(camera.x % gridSize);
+            const startY = -(camera.y % gridSize);
+
+            for (let x = startX; x < canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = startY; y < canvas.height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+
+            // Paths / roads
+            ctx.fillStyle = '#8d6e63';
+            ctx.fillRect(300 - camera.x, 0, 40, canvas.height); // Vertical road
+            ctx.fillRect(0, 300 - camera.y, canvas.width, 40); // Horizontal road
+        }
+
+        // --- Draw Trees ---
+        function drawTrees() {
+            trees.forEach(tree => {
+                const screenX = tree.x - camera.x;
+                const screenY = tree.y - camera.y;
+
+                // Only draw if on screen
+                if (screenX < -50 || screenX > canvas.width + 50 ||
+                    screenY < -50 || screenY > canvas.height + 50) return;
+
+                // Trunk
+                ctx.fillStyle = '#5d4037';
+                ctx.fillRect(screenX - 3, screenY - 5, 6, tree.size + 5);
+
+                // Leaves (circle)
+                ctx.fillStyle = '#1b5e20';
+                ctx.beginPath();
+                ctx.arc(screenX, screenY - tree.size / 2, tree.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#2e7d32';
+                ctx.beginPath();
+                ctx.arc(screenX - 5, screenY - tree.size / 2 - 5, tree.size / 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(screenX + 5, screenY - tree.size / 2 - 3, tree.size / 3.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // --- Draw Buildings ---
+        function drawBuildings() {
+            buildings.forEach(building => {
+                const screenX = building.x - camera.x;
+                const screenY = building.y - camera.y;
+
+                if (screenX < -200 || screenX > canvas.width + 200 ||
+                    screenY < -200 || screenY > canvas.height + 200) return;
+
+                // Building body
+                ctx.fillStyle = building.color;
+                ctx.fillRect(screenX, screenY, building.w, building.h);
+
+                // Roof
+                ctx.fillStyle = '#3e2723';
+                ctx.fillRect(screenX - 5, screenY - 10, building.w + 10, 10);
+
+                // Windows
+                ctx.fillStyle = '#ffe082';
+                const windowSize = 12;
+                const gap = 8;
+                for (let wx = screenX + 10; wx < screenX + building.w - 10; wx += windowSize + gap) {
+                    for (let wy = screenY + 15; wy < screenY + building.h - 15; wy += windowSize + gap) {
+                        ctx.fillRect(wx, wy, windowSize, windowSize);
+                        ctx.fillStyle = '#ffe082';
+                    }
+                }
+
+                // Door
+                ctx.fillStyle = '#4e342e';
+                ctx.fillRect(screenX + building.w / 2 - 10, screenY + building.h - 30, 20, 30);
+            });
+        }
+
+        // --- Draw NPCs ---
+        function drawNPCs() {
+            npcs.forEach(npc => {
+                const screenX = npc.x - camera.x;
+                const screenY = npc.y - camera.y;
+
+                if (screenX < -50 || screenX > canvas.width + 50 ||
+                    screenY < -50 || screenY > canvas.height + 50) return;
+
+                // Body
+                ctx.fillStyle = npc.color;
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, npc.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Head
+                ctx.fillStyle = '#ffccbc';
+                ctx.beginPath();
+                ctx.arc(screenX, screenY - 10, 7, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Name label
+                ctx.fillStyle = 'white';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(npc.name, screenX, screenY - 25);
+
+                // Eyes
+                ctx.fillStyle = '#333';
+                ctx.fillRect(screenX - 3, screenY - 12, 2, 2);
+                ctx.fillRect(screenX + 1, screenY - 12, 2, 2);
+            });
+        }
+
+        // --- Draw Player ---
+        function drawPlayer() {
+            const screenX = player.x - camera.x;
+            const screenY = player.y - camera.y;
+
+            // Shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath();
+            ctx.ellipse(screenX + 10, screenY + 20, 12, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Body (rectangle with rounded corners)
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.roundRect(screenX, screenY, player.width, player.height, 4);
+            ctx.fill();
+
+            // Head
+            ctx.fillStyle = '#ffccbc';
+            ctx.beginPath();
+            ctx.arc(screenX + 10, screenY - 6, 8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Eyes
+            ctx.fillStyle = '#333';
+            ctx.fillRect(screenX + 6, screenY - 8, 2, 3);
+            ctx.fillRect(screenX + 12, screenY - 8, 2, 3);
+
+            // Mouth
+            ctx.fillStyle = '#c62828';
+            ctx.fillRect(screenX + 8, screenY - 2, 4, 1.5);
+
+            // Hat (mast) ✨
+            ctx.fillStyle = '#e94560';
+            ctx.fillRect(screenX + 2, screenY - 16, 16, 8);
+            ctx.fillStyle = '#ff6b6b';
+            ctx.fillRect(screenX, screenY - 18, 20, 4);
+        }
+
+        // --- Draw HUD ---
+        function drawHUD() {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(5, 5, 200, 50);
+            ctx.fillStyle = 'white';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(`📍 Position: ${Math.floor(player.x)}, ${Math.floor(player.y)}`, 12, 25);
+            ctx.fillText(`🗺️ World: ${WORLD_WIDTH} x ${WORLD_HEIGHT}`, 12, 45);
+
+            // Mini map in corner
+            const miniX = canvas.width - 130;
+            const miniY = 10;
+            const miniW = 120;
+            const miniH = 120;
+            const scale = miniW / WORLD_WIDTH;
+
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(miniX - 5, miniY - 5, miniW + 10, miniH + 10);
+
+            // Mini map background
+            ctx.fillStyle = '#1b5e20';
+            ctx.fillRect(miniX, miniY, miniW, miniH);
+
+            // Mini map trees
+            ctx.fillStyle = '#388e3c';
+            trees.forEach(tree => {
+                ctx.fillRect(miniX + tree.x * scale, miniY + tree.y * scale, 2, 2);
+            });
+
+            // Mini map buildings
+            ctx.fillStyle = '#5d4037';
+            buildings.forEach(b => {
+                ctx.fillRect(miniX + b.x * scale, miniY + b.y * scale, Math.max(3, b.w * scale), Math.max(3, b.h * scale));
+            });
+
+            // Mini map player
+            ctx.fillStyle = '#e94560';
+            ctx.fillRect(miniX + player.x * scale - 2, miniY + player.y * scale - 2, 4, 4);
+
+            // Mini map border
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(miniX, miniY, miniW, miniH);
+        }
+
+        // --- Main Game Loop ---
+        function gameLoop() {
+            updatePlayer();
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw world
+            drawGrass();
+            drawBuildings();
+            drawTrees();
+            drawNPCs();
+            drawPlayer();
+            drawHUD();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Helper: roundRect ---
+        CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+            if (w < 2 * r) r = w / 2;
+            if (h < 2 * r) r = h / 2;
+            this.moveTo(x + r, y);
+            this.lineTo(x + w - r, y);
+            this.quadraticCurveTo(x + w, y, x + w, y + r);
+            this.lineTo(x + w, y + h - r);
+            this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            this.lineTo(x + r, y + h);
+            this.quadraticCurveTo(x, y + h, x, y + h - r);
+            this.lineTo(x, y + r);
+            this.quadraticCurveTo(x, y, x + r, y);
+            return this;
+        };
+
+        // --- Keyboard Controls ---
+        document.addEventListener('keydown', (e) => {
+            switch (e.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'W':
+                    keys.up = true;
+                    e.preventDefault();
+                    break;
+                case 'ArrowDown':
+                case 's':
+                case 'S':
+                    keys.down = true;
+                    e.preventDefault();
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    keys.left = true;
+                    e.preventDefault();
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    keys.right = true;
+                    e.preventDefault();
+                    break;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            switch (e.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'W':
+                    keys.up = false;
+                    e.preventDefault();
+                    break;
+                case 'ArrowDown':
+                case 's':
+                case 'S':
+                    keys.down = false;
+                    e.preventDefault();
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    keys.left = false;
+                    e.preventDefault();
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    keys.right = false;
+                    e.preventDefault();
+                    break;
+            }
+        });
+
+        // --- Mobile Button Controls ---
+        function setupButton(id, key) {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                keys[key] = true;
+            });
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                keys[key] = false;
+            });
+            btn.addEventListener('touchcancel', (e) => {
+                e.preventDefault();
+                keys[key] = false;
+            });
+            // Mouse fallback
+            btn.addEventListener('mousedown', () => keys[key] = true);
+            btn.addEventListener('mouseup', () => keys[key] = false);
+            btn.addEventListener('mouseleave', () => keys[key] = false);
+        }
+
+        setupButton('btnUp', 'up');
+        setupButton('btnDown', 'down');
+        setupButton('btnLeft', 'left');
+        setupButton('btnRight', 'right');
+
+        // --- Prevent scrolling on mobile ---
+        document.addEventListener('touchmove', (e) => {
+            if (e.target === canvas || e.target.closest('#controls')) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // --- Start Game ---
+        gameLoop();
+
+        console.log('🎮 Game Started! Explore the world!');
+        console.log(`🌍 World size: ${WORLD_WIDTH}x${WORLD_HEIGHT}`);
+        console.log(`🏘️ Buildings: ${buildings.length}, 🌳 Trees: ${trees.length}, 👤 NPCs: ${npcs.length}`);
+    </script>
+</body>
+</html>
